@@ -546,6 +546,24 @@ mod platform_impl {
     }
 }
 
+#[cfg(target_os = "android")]
+mod platform_impl {
+    pub use crate::host::aaudio::{
+        Device as AAudioDevice, Devices as AAudioDevices, Host as AAudioHost,
+        Stream as AAudioStream, SupportedInputConfigs as AAudioSupportedInputConfigs,
+        SupportedOutputConfigs as AAudioSupportedOutputConfigs,
+    };
+
+    impl_platform_host!(AAudio aaudio "AAudio");
+
+    /// The default host for the current compilation target platform.
+    pub fn default_host() -> Host {
+        AAudioHost::new()
+            .expect("the default host should always be available")
+            .into()
+    }
+}
+
 #[cfg(not(any(
     windows,
     target_os = "linux",
@@ -554,6 +572,7 @@ mod platform_impl {
     target_os = "macos",
     target_os = "ios",
     target_os = "emscripten",
+    target_os = "android",
     all(target_arch = "wasm32", feature = "wasm-bindgen"),
 )))]
 mod platform_impl {

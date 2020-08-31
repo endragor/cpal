@@ -1,3 +1,5 @@
+#[cfg(target_os = "android")]
+pub(crate) mod aaudio;
 #[cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd"))]
 pub(crate) mod alsa;
 #[cfg(all(windows, feature = "asio"))]
