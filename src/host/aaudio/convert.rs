@@ -1,7 +1,7 @@
 use std::convert::TryInto;
 use std::time::Duration;
 
-extern crate aaudio_sys;
+extern crate ndk;
 
 use crate::{
     BackendSpecificError, BuildStreamError, PauseStreamError, PlayStreamError, StreamError,
@@ -15,11 +15,12 @@ pub fn to_stream_instant(duration: Duration) -> StreamInstant {
     )
 }
 
-impl From<aaudio_sys::Error> for StreamError {
-    fn from(error: aaudio_sys::Error) -> Self {
-        use self::aaudio_sys::Error::*;
+impl From<ndk::aaudio::AAudioError> for StreamError {
+    fn from(error: ndk::aaudio::AAudioError) -> Self {
+        use self::ndk::aaudio::AAudioError::*;
+        use self::ndk::aaudio::AAudioErrorResult::*;
         match error {
-            Disconnected | Unavailable => Self::DeviceNotAvailable,
+            ErrorResult(Disconnected) | ErrorResult(Unavailable) => Self::DeviceNotAvailable,
             e => (BackendSpecificError {
                 description: e.to_string(),
             })
@@ -28,11 +29,12 @@ impl From<aaudio_sys::Error> for StreamError {
     }
 }
 
-impl From<aaudio_sys::Error> for PlayStreamError {
-    fn from(error: aaudio_sys::Error) -> Self {
-        use self::aaudio_sys::Error::*;
+impl From<ndk::aaudio::AAudioError> for PlayStreamError {
+    fn from(error: ndk::aaudio::AAudioError) -> Self {
+        use self::ndk::aaudio::AAudioError::*;
+        use self::ndk::aaudio::AAudioErrorResult::*;
         match error {
-            Disconnected | Unavailable => Self::DeviceNotAvailable,
+            ErrorResult(Disconnected) | ErrorResult(Unavailable) => Self::DeviceNotAvailable,
             e => (BackendSpecificError {
                 description: e.to_string(),
             })
@@ -41,11 +43,12 @@ impl From<aaudio_sys::Error> for PlayStreamError {
     }
 }
 
-impl From<aaudio_sys::Error> for PauseStreamError {
-    fn from(error: aaudio_sys::Error) -> Self {
-        use self::aaudio_sys::Error::*;
+impl From<ndk::aaudio::AAudioError> for PauseStreamError {
+    fn from(error: ndk::aaudio::AAudioError) -> Self {
+        use self::ndk::aaudio::AAudioError::*;
+        use self::ndk::aaudio::AAudioErrorResult::*;
         match error {
-            Disconnected | Unavailable => Self::DeviceNotAvailable,
+            ErrorResult(Disconnected) | ErrorResult(Unavailable) => Self::DeviceNotAvailable,
             e => (BackendSpecificError {
                 description: e.to_string(),
             })
@@ -54,14 +57,15 @@ impl From<aaudio_sys::Error> for PauseStreamError {
     }
 }
 
-impl From<aaudio_sys::Error> for BuildStreamError {
-    fn from(error: aaudio_sys::Error) -> Self {
-        use self::aaudio_sys::Error::*;
+impl From<ndk::aaudio::AAudioError> for BuildStreamError {
+    fn from(error: ndk::aaudio::AAudioError) -> Self {
+        use self::ndk::aaudio::AAudioError::*;
+        use self::ndk::aaudio::AAudioErrorResult::*;
         match error {
-            Disconnected | Unavailable => Self::DeviceNotAvailable,
-            NoFreeHandles => Self::StreamIdOverflow,
-            InvalidFormat | InvalidRate => Self::StreamConfigNotSupported,
-            IllegalArgument => Self::InvalidArgument,
+            ErrorResult(Disconnected) | ErrorResult(Unavailable) => Self::DeviceNotAvailable,
+            ErrorResult(NoFreeHandles) => Self::StreamIdOverflow,
+            ErrorResult(InvalidFormat) | ErrorResult(InvalidRate) => Self::StreamConfigNotSupported,
+            ErrorResult(IllegalArgument) => Self::InvalidArgument,
             e => (BackendSpecificError {
                 description: e.to_string(),
             })

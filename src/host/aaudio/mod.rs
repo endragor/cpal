@@ -4,7 +4,7 @@ use std::convert::TryInto;
 use std::time::{Duration, Instant};
 use std::vec::IntoIter as VecIntoIter;
 
-extern crate aaudio_sys;
+extern crate ndk;
 
 use crate::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crate::{
@@ -24,7 +24,7 @@ use self::android_media::{get_audio_record_min_buffer_size, get_audio_track_min_
 use self::audio_manager::{AudioDeviceDirection, AudioDeviceInfo, AudioFormat};
 use self::convert::to_stream_instant;
 
-use self::aaudio_sys::{AAudioStream, AAudioStreamBuilder, AAudioStreamInfo};
+use self::ndk::aaudio::{AAudioStream, AAudioStreamBuilder};
 
 const CHANNEL_MASKS: [i32; 8] = [
     android_media::CHANNEL_OUT_MONO,
@@ -217,11 +217,11 @@ fn builder_for_device(
     device: &Device,
     config: &StreamConfig,
     sample_format: SampleFormat,
-    direction: aaudio_sys::Direction,
+    direction: ndk::aaudio::AAudioDirection,
 ) -> Result<AAudioStreamBuilder, BuildStreamError> {
     let format = match sample_format {
-        SampleFormat::I16 => aaudio_sys::Format::I16,
-        SampleFormat::F32 => aaudio_sys::Format::F32,
+        SampleFormat::I16 => ndk::aaudio::AAudioFormat::PCM_I16,
+        SampleFormat::F32 => ndk::aaudio::AAudioFormat::PCM_Float,
         SampleFormat::U16 => {
             return Err(BackendSpecificError {
                 description: "U16 format is not supported on Android.".to_owned(),
@@ -230,63 +230,59 @@ fn builder_for_device(
         }
     };
     let mut builder = AAudioStreamBuilder::new()?
-        .set_direction(direction)
-        .set_format(format)
-        .set_channel_count(i32::from(config.channels));
+        .direction(direction)
+        .format(format)
+        .channel_count(i32::from(config.channels));
     builder = if let Some(info) = &device.0 {
-        builder.set_device_id(info.id)
+        builder.device_id(info.id)
     } else {
         builder
     };
-    builder = builder.set_sample_rate(config.sample_rate.0.try_into().unwrap());
+    builder = builder.sample_rate(config.sample_rate.0.try_into().unwrap());
     builder = match &config.buffer_size {
         BufferSize::Default => builder,
-        BufferSize::Fixed(size) => builder.set_buffer_capacity_in_frames(*size as i32),
+        BufferSize::Fixed(size) => builder.buffer_capacity_in_frames(*size as i32),
     };
     Ok(builder)
 }
 
-fn get_input_callback_info(
-    stream: &AAudioStreamInfo,
-    creation_time: &Instant,
-) -> InputCallbackInfo {
+fn get_input_callback_info(stream: &AAudioStream, creation_time: &Instant) -> InputCallbackInfo {
     let timestamp = stream
-        .get_timestamp_monotonic()
-        .unwrap_or(aaudio_sys::Timestamp {
+        .get_timestamp(ndk::aaudio::Clockid::Monotonic)
+        .unwrap_or(ndk::aaudio::Timestamp {
             frame_position: 0,
-            time_nanos: 0,
+            time_nanoseconds: 0,
         });
     InputCallbackInfo {
         timestamp: InputStreamTimestamp {
             callback: to_stream_instant(creation_time.elapsed()),
-            capture: to_stream_instant(Duration::from_nanos(timestamp.time_nanos as u64)),
+            capture: to_stream_instant(Duration::from_nanos(timestamp.time_nanoseconds as u64)),
         },
     }
 }
 
-fn get_output_callback_info(
-    stream: &AAudioStreamInfo,
-    creation_time: &Instant,
-) -> OutputCallbackInfo {
+fn get_output_callback_info(stream: &AAudioStream, creation_time: &Instant) -> OutputCallbackInfo {
     let timestamp = stream
-        .get_timestamp_monotonic()
-        .unwrap_or(aaudio_sys::Timestamp {
+        .get_timestamp(ndk::aaudio::Clockid::Monotonic)
+        .unwrap_or(ndk::aaudio::Timestamp {
             frame_position: 0,
-            time_nanos: 0,
+            time_nanoseconds: 0,
         });
     OutputCallbackInfo {
         timestamp: OutputStreamTimestamp {
             callback: to_stream_instant(creation_time.elapsed()),
-            playback: to_stream_instant(Duration::from_nanos(timestamp.time_nanos as u64)),
+            playback: to_stream_instant(Duration::from_nanos(timestamp.time_nanoseconds as u64)),
         },
     }
 }
 
-fn to_sample_format(format: aaudio_sys::Format) -> SampleFormat {
+fn to_sample_format(format: ndk::aaudio::AAudioFormat) -> SampleFormat {
     match format {
-        aaudio_sys::Format::Unspecified => panic!("Sample format must be specified here"),
-        aaudio_sys::Format::I16 => SampleFormat::I16,
-        aaudio_sys::Format::F32 => SampleFormat::F32,
+        ndk::aaudio::AAudioFormat::Unspecified | ndk::aaudio::AAudioFormat::Invalid => {
+            panic!("Sample format must be specified here")
+        }
+        ndk::aaudio::AAudioFormat::PCM_I16 => SampleFormat::I16,
+        ndk::aaudio::AAudioFormat::PCM_Float => SampleFormat::F32,
     }
 }
 
@@ -356,27 +352,27 @@ impl DeviceTrait for Device {
         D: FnMut(&Data, &InputCallbackInfo) + Send + 'static,
         E: FnMut(StreamError) + Send + 'static,
     {
-        let builder =
-            builder_for_device(self, config, sample_format, aaudio_sys::Direction::Input)?;
+        let builder = builder_for_device(
+            self,
+            config,
+            sample_format,
+            ndk::aaudio::AAudioDirection::Input,
+        )?;
         let creation_time = Instant::now();
         let stream = builder
-            .set_callbacks(
-                move |stream, data, _num_frames| {
-                    let sample_format = to_sample_format(stream.get_format());
-                    data_callback(
-                        &unsafe {
-                            Data::from_parts(
-                                data.as_ptr() as *mut _,
-                                data.len() / sample_format.sample_size(),
-                                sample_format,
-                            )
-                        },
-                        &get_input_callback_info(stream, &creation_time),
-                    );
-                    aaudio_sys::CallbackResult::Continue
-                },
-                move |_stream, err| error_callback(StreamError::from(err)),
-            )
+            .data_callback(Box::new(move |stream, data, num_frames| {
+                let sample_format = to_sample_format(stream.get_format().unwrap());
+                let samples_per_frame = stream.get_samples_per_frame() as usize;
+                let data_len = (num_frames as usize) * samples_per_frame;
+                data_callback(
+                    &unsafe { Data::from_parts(data as *mut _, data_len, sample_format) },
+                    &get_input_callback_info(stream, &creation_time),
+                );
+                ndk::aaudio::AAudioCallbackResult::Continue
+            }))
+            .error_callback(Box::new(move |_stream, err| {
+                error_callback(StreamError::from(err))
+            }))
             .open_stream()?;
         Ok(Stream(RefCell::new(stream)))
     }
@@ -392,27 +388,27 @@ impl DeviceTrait for Device {
         D: FnMut(&mut Data, &OutputCallbackInfo) + Send + 'static,
         E: FnMut(StreamError) + Send + 'static,
     {
-        let builder =
-            builder_for_device(self, config, sample_format, aaudio_sys::Direction::Output)?;
+        let builder = builder_for_device(
+            self,
+            config,
+            sample_format,
+            ndk::aaudio::AAudioDirection::Output,
+        )?;
         let creation_time = Instant::now();
         let stream = builder
-            .set_callbacks(
-                move |stream, data, _num_frames| {
-                    let sample_format = to_sample_format(stream.get_format());
-                    data_callback(
-                        &mut unsafe {
-                            Data::from_parts(
-                                data.as_ptr() as *mut _,
-                                data.len() / sample_format.sample_size(),
-                                sample_format,
-                            )
-                        },
-                        &get_output_callback_info(stream, &creation_time),
-                    );
-                    aaudio_sys::CallbackResult::Continue
-                },
-                move |_stream, err| error_callback(StreamError::from(err)),
-            )
+            .data_callback(Box::new(move |stream, data, num_frames| {
+                let sample_format = to_sample_format(stream.get_format().unwrap());
+                let samples_per_frame = stream.get_samples_per_frame() as usize;
+                let data_len = (num_frames as usize) * samples_per_frame;
+                data_callback(
+                    &mut unsafe { Data::from_parts(data as *mut _, data_len, sample_format) },
+                    &get_output_callback_info(stream, &creation_time),
+                );
+                ndk::aaudio::AAudioCallbackResult::Continue
+            }))
+            .error_callback(Box::new(move |_stream, err| {
+                error_callback(StreamError::from(err))
+            }))
             .open_stream()?;
         Ok(Stream(RefCell::new(stream)))
     }
