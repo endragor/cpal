@@ -45,9 +45,8 @@ js-sys = { version = "0.3.35" }
 web-sys = { version = "0.3.35", features = [ "AudioContext", "AudioContextOptions", "AudioBuffer", "AudioBufferSourceNode", "AudioNode",  "AudioDestinationNode", "Window", "AudioContextState"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
-aaudio-sys = { version = "0.1", path = "aaudio-sys" }
-ndk = "0.1"
-ndk-glue = "0.1"
+ndk = { version = "0.1", features = ["aaudio"], git = "https://github.com/rust-windowing/android-ndk-rs" }
+ndk-glue = { version = "0.1", git = "https://github.com/rust-windowing/android-ndk-rs" }
 jni = "0.17"
 num-traits = "0.2.6"
 num-derive = "0.3"
